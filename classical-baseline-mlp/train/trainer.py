@@ -123,7 +123,12 @@ def make_batch(smp, X, S, labels, B, rng):
     return np.array(Xb), np.array(Sb), np.array(Yb, dtype=float)
 
 
-def run(cfg, data_dir):
+def run(cfg, data_dir, train_cities=None, val_cities=None):
+    """train_cities/val_cities default to the fixed dev 11/3 split
+    (get_dev_split()) when not supplied — this keeps every existing CLI call
+    and the pilot run's behaviour unchanged. Passing them explicitly is what
+    lets train/cv.py reuse this exact function for each of the 5-fold
+    city-grouped CV splits, instead of duplicating the training loop."""
     os.makedirs(cfg.out_dir, exist_ok=True)
     n_params = mlp_model.param_count(cfg.hidden)
     tag = cfg.tag or f"mlp_pool8_h{cfg.hidden}_{cfg.representation}"
@@ -133,7 +138,8 @@ def run(cfg, data_dir):
     assert n_params <= 38, f"{n_params} params exceeds the 38-param QML budget"
 
     # ---- data (byte-identical pipeline to the QML side) ----
-    train_cities, val_cities = get_dev_split()
+    if train_cities is None or val_cities is None:
+        train_cities, val_cities = get_dev_split()
     fold = build_fold(train_cities, val_cities, data_dir)
     T_global = fit_global_hard_threshold(train_cities, fold.dcorr13, fold.labels, fold.valid)
     pools = {c: build_center_pools(fold.dcorr13[c], fold.labels[c], fold.valid[c], T_global)

@@ -34,16 +34,28 @@ from trainer import build_representation
 KEYS = ["prevalence", "AP", "roc_auc", "F1", "precision", "change_acc", "nochange_acc", "tau"]
 
 
-def main(data_dir, ckpt, hidden, representation, out, infer_batch, mask_dir):
+def evaluate_checkpoint(data_dir, ckpt, hidden, representation, train_cities=None,
+                        val_cities=None, infer_batch=4096, mask_dir=None,
+                        out=None, verbose=True):
+    """Core exhaustive-evaluation logic, importable so train/cv.py can reuse
+    it per-fold. train_cities/val_cities default to the fixed dev 11/3 split
+    when not supplied (unchanged CLI behaviour). NOTE: train_cities matters
+    here even though only val_cities are evaluated — build_fold() fits the
+    band-normalization/PCA transforms on train_cities ONLY, so a CV fold's
+    own train_cities must be passed to avoid re-using the dev split's
+    transforms on a different fold's val cities (that would leak fold
+    boundaries through the fitted preprocessing)."""
     params = np.load(ckpt)
     n_params = mlp_model.param_count(hidden)
     assert params.shape == (n_params,), (
         f"checkpoint has {params.shape} params but hidden={hidden} implies {n_params}")
     forward = lambda p, Xb, Sb: mlp_model.forward(p, Xb, Sb, hidden=hidden)
-    print(f"MLP-pool8 (hidden={hidden}) | {representation} | {n_params} params | "
-          f"ckpt {os.path.basename(ckpt)}")
+    if verbose:
+        print(f"MLP-pool8 (hidden={hidden}) | {representation} | {n_params} params | "
+              f"ckpt {os.path.basename(ckpt)}")
 
-    train_cities, val_cities = get_dev_split()
+    if train_cities is None or val_cities is None:
+        train_cities, val_cities = get_dev_split()
     fold = build_fold(train_cities, val_cities, data_dir)
     Xva, Sva = build_representation(fold, val_cities, representation)
 
@@ -57,30 +69,40 @@ def main(data_dir, ckpt, hidden, representation, out, infer_batch, mask_dir):
         m = fold.valid[c]
         per_city[c] = evaluate_predictions(P, fold.labels[c], select_threshold=True, mask=m)
         allp.append(P[m].ravel()); ally.append(fold.labels[c][m].ravel())
-        print(f"  {c:11} prev {per_city[c]['prevalence']:.4f}  AP {per_city[c]['AP']:.4f}  "
-              f"ROC {per_city[c]['roc_auc']:.4f}  F1* {per_city[c]['F1']:.4f}  "
-              f"prec {per_city[c]['precision']:.4f}  chAcc {per_city[c]['change_acc']:.3f}  "
-              f"({time.time()-t:.1f}s)", flush=True)
+        if verbose:
+            print(f"  {c:11} prev {per_city[c]['prevalence']:.4f}  AP {per_city[c]['AP']:.4f}  "
+                  f"ROC {per_city[c]['roc_auc']:.4f}  F1* {per_city[c]['F1']:.4f}  "
+                  f"prec {per_city[c]['precision']:.4f}  chAcc {per_city[c]['change_acc']:.3f}  "
+                  f"({time.time()-t:.1f}s)", flush=True)
         if mask_dir:
             save_mask_png(P, per_city[c]["tau"], os.path.join(mask_dir, f"{c}-cm.png"))
 
     macro = {k: float(np.mean([per_city[c][k] for c in val_cities])) for k in KEYS}
     micro = evaluate_predictions(np.concatenate(allp), np.concatenate(ally),
                                  select_threshold=True)
-    print(f"\n  macro (per-city mean, per-city tau* = optimistic):")
-    print(f"    AP {macro['AP']:.4f}  ROC {macro['roc_auc']:.4f}  F1* {macro['F1']:.4f}  "
-          f"prec {macro['precision']:.4f}  chAcc {macro['change_acc']:.3f}")
-    print(f"  micro (pooled pixels, ONE global tau* = deployment):")
-    print(f"    AP {micro['AP']:.4f}  ROC {micro['roc_auc']:.4f}  F1* {micro['F1']:.4f}  "
-          f"prec {micro['precision']:.4f}  chAcc {micro['change_acc']:.3f}  "
-          f"tau {micro['tau']:.3f}  prev {micro['prevalence']:.4f}")
+    if verbose:
+        print(f"\n  macro (per-city mean, per-city tau* = optimistic):")
+        print(f"    AP {macro['AP']:.4f}  ROC {macro['roc_auc']:.4f}  F1* {macro['F1']:.4f}  "
+              f"prec {macro['precision']:.4f}  chAcc {macro['change_acc']:.3f}")
+        print(f"  micro (pooled pixels, ONE global tau* = deployment):")
+        print(f"    AP {micro['AP']:.4f}  ROC {micro['roc_auc']:.4f}  F1* {micro['F1']:.4f}  "
+              f"prec {micro['precision']:.4f}  chAcc {micro['change_acc']:.3f}  "
+              f"tau {micro['tau']:.3f}  prev {micro['prevalence']:.4f}")
 
     res = {"model": f"MLP-pool8 h={hidden}", "n_params": n_params,
            "representation": representation, "checkpoint": os.path.basename(ckpt),
-           "per_city": per_city, "macro": macro, "micro": micro}
-    with open(out, "w") as f:
-        json.dump(res, f, indent=2)
-    print(f"\nsaved {out}")
+           "val_cities": list(val_cities), "per_city": per_city, "macro": macro, "micro": micro}
+    if out:
+        with open(out, "w") as f:
+            json.dump(res, f, indent=2)
+        if verbose:
+            print(f"\nsaved {out}")
+    return res
+
+
+def main(data_dir, ckpt, hidden, representation, out, infer_batch, mask_dir):
+    evaluate_checkpoint(data_dir, ckpt, hidden, representation,
+                        infer_batch=infer_batch, mask_dir=mask_dir, out=out)
 
 
 if __name__ == "__main__":

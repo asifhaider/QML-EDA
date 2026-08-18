@@ -6,7 +6,7 @@ comparison the challenge requires: *"a classical model receiving the same
 input features and not containing more trainable parameters than the QML
 model."*
 
-This first model is a small **MLP** (multi-layer perceptron). 
+This first model is a small **MLP** (multi-layer perceptron).
 
 ---
 
@@ -63,9 +63,7 @@ x_pool = [ center_pixel (4,),  mean_of_the_8_neighbours (4,) ]     ->  8 numbers
 This is not new information smuggled into the input — it's the *same* 4
 features (whichever representation is used) that the QML circuit sees,
 spatially aggregated. Mean-pooling over a window is exactly the operation
-validated by the QML side's own EDA,
-"spatial context sweep" / "Part 2/3" — mean-pooled `|ΔB|` over growing
-windows is one of the central findings there). So this isn't an arbitrary
+validated by the QML side's own EDA. So this isn't an arbitrary
 classical-side trick; it leans on the same idea the feature analysis already
 established.
 
@@ -223,11 +221,10 @@ numbers (`QML-Binary-Segmentation/docs/results_capacity_sweep.md`) are:
 | QML M3, L=2 | 74 | 0.147 | 0.302 | 0.899 |
 
 At fewer-or-comparable parameters and an identical protocol, this MLP
-currently scores well above every M3 configuration on every headline metric.
-**This is a single-seed, single-split result and needs 5-fold city-grouped CV
-before it's a real conclusion** (see §6) — flagged here rather than treated
-as settled, exactly because it's the kind of surprising result that most
-needs independent re-checking.
+currently scores well above every M3 configuration on every headline metric,
+**on this specific 3-city split**. §5.3 below tests whether that holds up
+across different splits — it partially does, and partially doesn't; read
+that section before treating this table as a general conclusion.
 
 ### 5.2 Is 20 epochs enough? (tested, not assumed)
 
@@ -258,13 +255,92 @@ tuning the learning rate does not move the ceiling. That ceiling (micro AP ≈
 combination on this data, not an artifact of under-training. This does *not*
 rule out that a different pooling design, a wider hidden layer within
 budget, or the planned conv baseline could push past it — that's an
-architecture question, separate from training duration. Still open: whether
-this ceiling is seed-dependent (only one random init tested so far).
+architecture question, separate from training duration. (Whether it's
+seed-dependent is checked next, in §5.4 — it isn't.)
 
 The trainer already guards against reporting a stale/degraded late-epoch
 checkpoint: it tracks the best pooled-cheap-AP checkpoint every epoch
 (`*_bestcheap.npy`), so the number in §5.1 reflects the actual best point
 found, not an arbitrary final epoch.
+
+### 5.3 5-fold city-grouped CV — does the §5.1 result hold up?
+
+`train/cv.py` trains 5 independent models, each holding out a different
+~2–3 city group (`splits.py::get_grouped_folds(n_splits=5)`), so all 14
+labelled cities are evaluated as a held-out city exactly once. Same protocol
+as §5.1 (PCA-4, 20 epochs — already shown sufficient in §5.2).
+
+| fold | held-out cities | micro AP |
+|---|---|---|
+| 0 | cupertino, mumbai, nantes | 0.468 |
+| 1 | saclay_e, pisa, aguasclaras | 0.080 |
+| 2 | paris, bercy, rennes | 0.371 |
+| 3 | hongkong, abudhabi, beirut | 0.256 |
+| 4 | bordeaux, beihai | 0.290 |
+
+**mean micro AP = 0.293, std = 0.129** across folds — a ~6× spread between
+the best (0.468) and worst (0.080) fold. Full per-city breakdown (each city
+evaluated once, as its fold's held-out city):
+
+| city | prevalence | AP | F1* | ROC-AUC | ChangeAcc |
+|---|---|---|---|---|---|
+| cupertino | 2.37% | 0.639 | 0.605 | 0.978 | 0.634 |
+| rennes | 2.58% | 0.588 | 0.582 | 0.975 | 0.632 |
+| beirut | 2.69% | 0.394 | 0.446 | 0.905 | 0.470 |
+| beihai | 2.49% | 0.350 | 0.398 | 0.915 | 0.399 |
+| mumbai | 2.56% | 0.331 | 0.376 | 0.817 | 0.384 |
+| nantes | 1.14% | 0.328 | 0.393 | 0.956 | 0.434 |
+| hongkong | 3.56% | 0.277 | 0.351 | 0.819 | 0.366 |
+| paris | 0.29% | 0.207 | 0.270 | 0.978 | 0.378 |
+| bercy | 0.74% | 0.181 | 0.250 | 0.889 | 0.233 |
+| bordeaux | 1.00% | 0.147 | 0.214 | 0.890 | 0.190 |
+| pisa | 1.64% | 0.138 | 0.217 | 0.775 | 0.192 |
+| aguasclaras | 1.64% | 0.083 | 0.180 | 0.780 | 0.226 |
+| abudhabi | 3.76% | 0.080 | 0.148 | 0.631 | 0.209 |
+| saclay_e | 0.99% | 0.028 | 0.062 | 0.758 | 0.075 |
+
+**What this changes about §5.1's comparison:** the 0.468 headline number was
+computed on one specific 3-city split (paris/cupertino/beihai), and that
+split is real — it wasn't cherry-picked, it's the QML side's own dev split,
+reused for exact comparability. But it isn't representative of the model's
+*average* case: it happens to include cupertino, the single best-performing
+city (AP 0.64), which pulls the pooled/micro number up. The honest summary
+is: **on the dev split specifically, at matched protocol, this MLP still
+outperforms the reported QML M3 numbers** (0.468 vs 0.111–0.147 AP) — that
+comparison is unaffected by this CV, since it was never claimed to be
+anything but a same-split comparison. But **this MLP's generalization is
+highly city-dependent** (AP swings from 0.03 to 0.64 by city), so the dev
+split's 0.468 should not be read as "the model's AP is ~0.47" in general —
+the CV mean (0.293) is a more honest single-number summary of typical
+performance, and even individual cities span nearly a 10× range in AP by
+this model's ranking of them (saclay_e 0.028 vs cupertino 0.639), independent
+of prevalence (e.g. abudhabi has the *highest* prevalence, 3.76%, and one of
+the *worst* APs, 0.080). What drives that per-city spread hasn't been
+investigated yet — it's a genuine open question, not explained by class
+imbalance alone.
+
+### 5.4 Seed sensitivity — is the ceiling seed-dependent?
+
+`train/seed_check.py` reruns the §5.1 dev-split protocol from 5 different
+random seeds (seed controls both weight init and the sampler's stochastic
+patch stream — the two aren't separated in the current config, noted in the
+script's docstring).
+
+| metric | mean | std | min | max |
+|---|---|---|---|---|
+| micro AP | 0.4665 | **0.0034** | 0.462 | 0.472 |
+| micro F1* | 0.4740 | 0.0049 | 0.467 | 0.480 |
+| micro ROC-AUC | 0.9543 | 0.0016 | 0.951 | 0.956 |
+
+**Answer: no, essentially not.** Across 5 seeds on the fixed dev split, micro
+AP varies by ±0.003 (< 1% relative) — negligible next to the ~0.13 std seen
+across CV folds in §5.3. This isolates *where* the variance actually comes
+from: **not** random initialization or sampling noise (that part is highly
+reproducible), but **which cities end up in validation**. That's a
+domain-generalization property of the architecture/features on this dataset,
+not an optimization instability — consistent, in fact, with what the QML
+side's own capacity-sweep docs report for M3: cross-city spread that persists
+regardless of model capacity.
 
 ---
 
@@ -287,6 +363,12 @@ python3 train/trainer.py --data_dir /path/to/raw_data \
 python3 train/eval_full.py --data_dir /path/to/raw_data \
   --ckpt results/runs/mlp_pca_run1_bestcheap.npy --representation pca \
   --mask_dir results/runs/mlp_pca_run1_masks
+
+# 5-fold city-grouped CV (trains 5 models, one per fold, ~75s total)
+python3 train/cv.py --data_dir /path/to/raw_data --representation pca
+
+# seed sensitivity on the fixed dev split (5 seeds, ~75s total)
+python3 train/seed_check.py --data_dir /path/to/raw_data --representation pca
 ```
 
 `--data_dir` should point at the `raw_data/` folder (containing `images/` and
@@ -296,7 +378,9 @@ Artifacts land in `results/runs/`: `<tag>.jsonl` (per-epoch log),
 `<tag>_bestcheap.npy` (best pooled cheap-val AP — **use this checkpoint for
 cross-model comparison**, it's the unbiased selector), `<tag>_best.npy` (best
 exhaustive AP — biased when only one city is evaluated exhaustively),
-`<tag>_final.npy`, `<tag>_fullval.json` (from `eval_full.py`).
+`<tag>_final.npy`, `<tag>_fullval.json` (from `eval_full.py`). `cv.py` and
+`seed_check.py` additionally write a `*_summary.json` with the aggregated
+mean/std across folds or seeds.
 
 ---
 
@@ -310,9 +394,10 @@ exhaustive AP — biased when only one city is evaluated exhaustively),
 | PNG mask export verified against challenge format | ✅ |
 | Real training run, full protocol, exhaustive multi-city evaluation | ✅ |
 | Training-length / learning-rate sensitivity checked | ✅ |
-| 5-fold city-grouped CV (needed before any of §5.1's numbers are a real claim) | ⬜ next |
-| Seed sensitivity (is the §5.2 ceiling seed-dependent?) | ⬜ |
-| Second classical baseline: 3×3 conv, 4→1, 37 params (the model designated in `QML-Binary-Segmentation/docs/model_ladder.md` as M3's literal parameter-matched twin) | ⬜ |
+| 5-fold city-grouped CV | ✅ — mean micro AP 0.293 ± 0.129, huge per-city spread (§5.3) |
+| Seed sensitivity | ✅ — negligible (std 0.003 on AP); variance is city-driven, not init-driven (§5.4) |
+| Second classical baseline: 3×3 conv, 4→1, 37 params (the model designated in `QML-Binary-Segmentation/docs/model_ladder.md` as M3's literal parameter-matched twin) | ⬜ next |
+| Investigate what drives the per-city AP spread (§5.3) — not explained by prevalence alone | ⬜ |
 | `physical`-representation run (currently only `pca` has a real training run) | ⬜ |
 | Framework choice: staying numpy-only while models remain this small; revisit PyTorch if a future architecture needs it (see §3) | noted, no action needed |
 
