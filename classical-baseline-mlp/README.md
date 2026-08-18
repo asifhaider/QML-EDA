@@ -6,7 +6,7 @@ comparison the challenge requires: *"a classical model receiving the same
 input features and not containing more trainable parameters than the QML
 model."*
 
-This first model is a small **MLP** (multi-layer perceptron).
+This first model is a small **MLP** (multi-layer perceptron). 
 
 ---
 
@@ -146,7 +146,7 @@ in `import pennylane as qml` as a side effect, and this directory has no
 other reason to depend on a quantum simulation framework. Confirmed:
 `requirements.txt` here lists only `numpy`, `scikit-learn`, `pillow` — no
 PennyLane. (Considered switching everything to PyTorch for extensibility;
-decided to stay numpy-only while models remain this small)
+decided to stay numpy-only while models remain this small.
 
 **Training protocol matched to the QML side's pilot defaults** (dev 11/3
 split, `lr=0.02`, `batch=32`, `steps_per_epoch=160`, `epochs=20`, plain BCE,
@@ -341,6 +341,31 @@ domain-generalization property of the architecture/features on this dataset,
 not an optimization instability — consistent, in fact, with what the QML
 side's own capacity-sweep docs report for M3: cross-city spread that persists
 regardless of model capacity.
+
+### 5.5 Evaluation Metrics — Accuracy, Change-Accuracy, No-change-Accuracy, F1
+
+The challenge doc names four specific metrics: **Accuracy, Change accuracy,
+No-change accuracy, F1**:
+
+| | Accuracy | Change Accuracy | No-change Accuracy | F1 |
+|---|---|---|---|---|
+| **Pilot** (pooled, dev split) | 0.976 | 0.494 | 0.987 | 0.476 |
+| **5-fold CV** (mean ± std) | 0.973 ± 0.009 | 0.350 ± 0.113 | 0.986 ± 0.005 | 0.344 ± 0.112 |
+| **Seed check** (mean ± std, dev split) | 0.977 ± 0.001 | 0.476 ± 0.017 | 0.988 ± 0.001 | 0.474 ± 0.005 |
+
+**Caveat on Accuracy specifically:** at ~2.2% true prevalence, overall
+Accuracy is dominated by the majority no-change class — a trivial
+"always predict no-change" classifier already scores **~97.8% Accuracy**
+without detecting a single true change pixel. That's exactly why AP/F1/
+Change-Accuracy were used as the headline metrics earlier (matching the QML
+side's own stated priority under severe imbalance), not Accuracy — but the
+challenge names Accuracy explicitly, so it's reported here in full, with this
+caveat attached rather than left to read as more impressive than it is.
+
+`train/cv.py`'s and `train/seed_check.py`'s `MICRO_KEYS` originally omitted
+`accuracy`/`nochange_acc` from their own aggregate summaries too (fixed now,
+for future runs) — the per-fold/per-seed `*_fullval.json` files always had
+the full numbers regardless.
 
 ---
 
