@@ -1,0 +1,21 @@
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# os / cache
+.DS_Store
+*.npz
+
+# dataset (large, not ours to redistribute -- point --data_dir at it instead)
+raw_data/
+*.tif
+
+# training run artifacts: keep logs (*.jsonl) and metrics (*_fullval.json) and
+# the deliverable PNG masks; weights are regenerable from a training run, so
+# ignore them (mirrors QML-Binary-Segmentation/.gitignore's convention)
+results/runs/*_best.npy
+results/runs/*_bestcheap.npy
+results/runs/*_final.npy
