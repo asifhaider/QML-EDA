@@ -4,10 +4,7 @@ Second classical-model baseline for the **Quantum Change Detection in
 Satellite Earth Observations** challenge (2026 Niels Bohr Quantum Summer
 School). This directory
 implements the **literal parameter-matched twin the QML side's own
-documentation designates for its main model, M3**:
-
-> "M3 (38 params) vs classical 3×3 same-pad conv, 4→1 channels: 37 params.
-> Same input, same receptive field." — `QML-Binary-Segmentation/docs/model_ladder.md`
+documentation designates for its main model, M3**.
 
 So unlike the MLP (an original design, built to explore whether nonlinearity
 over a compressed spatial summary helps), this model's job is to implement
@@ -19,9 +16,7 @@ over a compressed spatial summary helps), this model's job is to implement
 
 A single 3×3 convolution: 4 input channels (the same Physical-4/PCA-4
 features as everywhere else in this project) → 1 output channel → sigmoid.
-It differs from `classical-baseline-mlp` along two *independent* axes —
-worth being explicit about, because "conv" sounds like the more
-sophisticated model and isn't, exactly:
+It differs from `classical-baseline-mlp` along two *independent* axes:
 
 | | pooled-8 MLP | this conv model |
 |---|---|---|
@@ -38,7 +33,7 @@ classical side of the comparison needs.
 
 ---
 
-## 2. Parameter count: 37, derived exactly
+## 2. Parameter count: 37
 
 ```
 kernel : 3 × 3 × 4  (kh, kw, in_channels; single out_channel)  = 36 weights
@@ -51,9 +46,6 @@ the limit, since the architecture is fixed by the model_ladder.md
 specification rather than a free design choice like the MLP's hidden width
 was.
 
-`models/conv.py::param_count()` computes this; `init_params()` builds a flat
-`[W (36), b (1)]` vector (Glorot-uniform-scaled weights, zero bias — same
-initialization philosophy as the MLP).
 
 ---
 
@@ -113,7 +105,7 @@ zero-padding for at least one of its 9 kernel taps.
 
 ---
 
-## 5. Verification performed — including a caught test bug, not just a pass
+## 5. Verification performed
 
 `models/conv.py`'s self-test (`python3 models/conv.py`) covers:
 
@@ -228,11 +220,6 @@ to draw early on, but that's a hypothesis, not verified.)
 | **5-fold CV** (mean ± std) | 0.974 ± 0.006 | 0.345 ± 0.129 | 0.987 ± 0.004 | 0.334 ± 0.106 |
 | **Seed check** (mean ± std, dev split) | 0.973 ± 0.001 | 0.491 ± 0.012 | 0.984 ± 0.002 | 0.450 ± 0.011 |
 
-Same caveat as the MLP: at ~2.2% prevalence, a trivial "always predict
-no-change" model already scores ~97–98% Accuracy — which is why AP/F1/
-Change-Accuracy remain the metrics actually worth reading for model quality,
-even though Accuracy is reported here in full because the challenge requires
-it.
 
 ---
 
@@ -301,9 +288,7 @@ additionally write a `*_summary.json`.
 | Real training run, exhaustive multi-city evaluation | ✅ |
 | 5-fold city-grouped CV | ✅ — mean micro AP 0.272 ± 0.122, same per-city pattern as the MLP |
 | Seed sensitivity | ✅ — small (std 0.010 on AP) relative to CV spread |
-| `physical`-representation run (currently only `pca` has a real run, matching the MLP directory's status) | ⬜ |
-| Direct three-way comparison table (MLP vs. conv vs. QML M3) under a shared writeup | ⬜ |
-| Investigate why the per-city AP spread is nearly identical across two structurally different classical models (§6.2) — is it explained by something in the data itself (label density pattern, geography, sensor conditions)? | ⬜ |
+
 
 ---
 
