@@ -28,7 +28,7 @@ inputs to even **one** hidden unit already costs `36 weights + 1 bias = 37`
 parameters, leaving essentially nothing for anything downstream. So the
 hidden layer would be forced to width 1.
 
-That's not just small, it's **degenerate**. A network with one hidden unit is
+It's essentially **degenerate**. A network with one hidden unit is
 ```
 p = sigmoid(a · f(w·x) + b)
 ```
@@ -39,19 +39,16 @@ scalar. That means:
   logistic regression on `w·x` alone,
 - so **AP and ROC-AUC — both rank-based metrics — come out the same**,
 - and **F1** (ranking + one threshold) is also invariant to this kind of
-  monotone rescaling — `QML-Binary-Segmentation/train/inference.py`'s
-  docstring makes exactly this point about AP/F1 for a different reason
-  (calibration invariance), and it applies here too.
+  monotone rescaling
 
 In other words: **a literal 36→1→1 MLP is not a different model from
 logistic regression at this budget** — it would just be extra code that
-produces the same answer, dressed up as "nonlinear." Worth catching before
-building it, not after.
+produces the same answer, dressed up as "nonlinear."
 
 The next-cheapest fix — 2 hidden units — doesn't help either: `36 × 2 = 72`
 weights in the first layer alone, already ~2× over budget.
 
-### 1.2 The fix: pool the patch to 8 numbers *before* the MLP
+### 1.2 The solution: pool the patch to 8 numbers *before* the MLP
 
 Instead of feeding all 36 raw numbers into the MLP, the patch is first
 reduced with a **fixed, non-trainable** transform:
@@ -60,12 +57,10 @@ reduced with a **fixed, non-trainable** transform:
 x_pool = [ center_pixel (4,),  mean_of_the_8_neighbours (4,) ]     ->  8 numbers
 ```
 
-This is not new information smuggled into the input — it's the *same* 4
+This is the *same* 4
 features (whichever representation is used) that the QML circuit sees,
 spatially aggregated. Mean-pooling over a window is exactly the operation
-validated by the QML side's own EDA. So this isn't an arbitrary
-classical-side trick; it leans on the same idea the feature analysis already
-established.
+validated by the QML side's own EDA.
 
 With an 8-dimensional input, a hidden layer of width ≥ 2 becomes affordable,
 which breaks the monotonic-collapse problem: the network can now combine
@@ -81,13 +76,7 @@ layer 2  (3 -> 1):   W2 (3,)  =  3 weights  +  b2 ()   = 1 bias     =  4
 ```
 `31 ≤ 38` ✓ — with 7 params of headroom left deliberately unused, in favor of
 a standard, fully-biased architecture over squeezing to exactly 38 by
-dropping a bias somewhere. (If it later seems worth using the full budget:
-hidden width 4 with the hidden-layer bias dropped gives exactly `9·4 + 4 + 1
-= 37` params — noted here as the next option, not implemented yet.)
-
-`hidden` is a config parameter (`models/mlp.py::HIDDEN`, default 3;
-`param_count(hidden)` computes the exact count for any width), so this is
-easy to revisit.
+dropping a bias somewhere.
 
 ---
 
@@ -125,28 +114,13 @@ This directory imports `splits.py`, `preprocess.py`, `pools.py`, `sampler.py`
 `QML-Binary-Segmentation/train/`) **directly**, via `sys.path`, rather than
 re-deriving equivalent logic here.
 
-**Why:** the challenge's "same input features" requirement is easy to
-silently violate — a slightly different percentile clip, a subtly different
-median-correction, a different train/val city split — and such a mismatch
-would invalidate the whole comparison without being obviously wrong-looking.
-Importing the *exact same functions* makes that class of bug impossible by
-construction, at the cost of a soft dependency between the two directories
-(this one won't run standalone without its sibling directory present).
-
 **What's reused:** city splits (`get_dev_split`), the robust band
 normalization + per-pair median correction + Physical-4/PCA-4 transforms
 (`build_fold`, `transform_physical4/pca4`), the positive/hard-negative/
 ordinary-negative pool logic (`build_center_pools`), the city-balanced 1:1:2
 stochastic sampler (`SpatialPatchSampler`), and all inference/metric code.
 
-**What's NOT reused, on purpose:** `QML-Binary-Segmentation/train/trainer.py`
-is *not* imported, even though it has a `build_representation` helper this
-directory also needs (duplicated here, ~10 lines) — importing it would pull
-in `import pennylane as qml` as a side effect, and this directory has no
-other reason to depend on a quantum simulation framework. Confirmed:
-`requirements.txt` here lists only `numpy`, `scikit-learn`, `pillow` — no
-PennyLane. (Considered switching everything to PyTorch for extensibility;
-decided to stay numpy-only while models remain this small.
+
 
 **Training protocol matched to the QML side's pilot defaults** (dev 11/3
 split, `lr=0.02`, `batch=32`, `steps_per_epoch=160`, `epochs=20`, plain BCE,
@@ -183,8 +157,7 @@ The full pipeline was also dry-run **end-to-end against the real `raw_data`**
   identically to each city's true `(H, W)` — matching the challenge's
   required deliverable format.
 
-Scratch/smoke-test artifacts were deleted after verification; `results/runs/`
-holds only real runs (§5).
+
 
 ---
 
@@ -226,7 +199,7 @@ currently scores well above every M3 configuration on every headline metric,
 across different splits — it partially does, and partially doesn't; read
 that section before treating this table as a general conclusion.
 
-### 5.2 Is 20 epochs enough? (tested, not assumed)
+### 5.2 Is 20 epochs enough? (tested)
 
 The pilot protocol's `epochs=20` was copied from the QML side's own pilot
 defaults, not independently tuned — so it was tested directly:
@@ -353,14 +326,6 @@ No-change accuracy, F1**:
 | **5-fold CV** (mean ± std) | 0.973 ± 0.009 | 0.350 ± 0.113 | 0.986 ± 0.005 | 0.344 ± 0.112 |
 | **Seed check** (mean ± std, dev split) | 0.977 ± 0.001 | 0.476 ± 0.017 | 0.988 ± 0.001 | 0.474 ± 0.005 |
 
-**Caveat on Accuracy specifically:** at ~2.2% true prevalence, overall
-Accuracy is dominated by the majority no-change class — a trivial
-"always predict no-change" classifier already scores **~97.8% Accuracy**
-without detecting a single true change pixel. That's exactly why AP/F1/
-Change-Accuracy were used as the headline metrics earlier (matching the QML
-side's own stated priority under severe imbalance), not Accuracy — but the
-challenge names Accuracy explicitly, so it's reported here in full, with this
-caveat attached rather than left to read as more impressive than it is.
 
 `train/cv.py`'s and `train/seed_check.py`'s `MICRO_KEYS` originally omitted
 `accuracy`/`nochange_acc` from their own aggregate summaries too (fixed now,
@@ -421,10 +386,7 @@ mean/std across folds or seeds.
 | Training-length / learning-rate sensitivity checked | ✅ |
 | 5-fold city-grouped CV | ✅ — mean micro AP 0.293 ± 0.129, huge per-city spread (§5.3) |
 | Seed sensitivity | ✅ — negligible (std 0.003 on AP); variance is city-driven, not init-driven (§5.4) |
-| Second classical baseline: 3×3 conv, 4→1, 37 params (the model designated in `QML-Binary-Segmentation/docs/model_ladder.md` as M3's literal parameter-matched twin) | ⬜ next |
-| Investigate what drives the per-city AP spread (§5.3) — not explained by prevalence alone | ⬜ |
-| `physical`-representation run (currently only `pca` has a real training run) | ⬜ |
-| Framework choice: staying numpy-only while models remain this small; revisit PyTorch if a future architecture needs it (see §3) | noted, no action needed |
+
 
 ---
 
